@@ -1,0 +1,19 @@
+# :admins: key should be a list of nicks that are allowed to use admin commands.
+# Note that a string match on nickname is the ONLY check done!
+:irc:
+  :nick: 'jirabot'
+  :password: 'password'
+  :server: 'irc.someserver.com'
+  :port: 6697
+  :ssl: true
+  :channels:
+    - '#jirabot'
+    - '#otherchannel'
+  :admins:
+    - 'Xunil'
+
+:jira:
+  :url: 'http://localhost:8080/jira/'
+  :user: 'jirabot'
+  :password: 'password'
+  :filter: '10234'

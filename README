@@ -1,0 +1,1 @@
+This is a very simple IRC bot which watches JIRA, and reports when tickets are created, changed, or closed.  It connects to the server defined in jirabot.yaml, joins the specified channels, and speaks up only to announce ticket changes.
