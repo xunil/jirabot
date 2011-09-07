@@ -2,6 +2,8 @@
 # vim:ts=2:sts=2:sw=2:et:ft=ruby
 require 'rubygems'
 require 'yaml'
+require 'net/http'
+require 'cgi'
 require 'eventmachine'
 require 'isaac/bot'
 require 'jira4r'
@@ -37,6 +39,17 @@ require 'soap/mapping'
 #   @status="5", 
 #   @duedate=#<DateTime: 4919121/2,0,2299161>>
 
+Colors = {
+  :black   => 30,
+  :red     => 31,
+  :green   => 32,
+  :yellow  => 33,
+  :blue    => 34,
+  :magenta => 35,
+  :cyan    => 36,
+  :white   => 37,
+}
+
 class JiraBot
   def initialize
     @config = YAML.load(File.open('jirabot.yaml'))
@@ -44,7 +57,13 @@ class JiraBot
       Dir.chdir(@config[:irc][:logdir])
     end
 
-    @jira = Jira4R::JiraTool.new(2, @config[:jira][:url])
+    if @config[:jira].has_key?(:apiurl)
+      api_url = @config[:jira][:apiurl]
+    else
+      api_url = @config[:jira][:url]
+    end
+
+    @jira = Jira4R::JiraTool.new(2, api_url)
     @jira.login(@config[:jira][:user], @config[:jira][:password])
     @statuses = @jira.getStatuses().inject({}) {|result, element| result.merge({element.id => element.name})}
     @priorities = @jira.getPriorities().inject({}) {|result, element| result.merge({element.id => element.name})}
@@ -115,34 +134,81 @@ class JiraBot
     end
   end
 
+  def shorten_url(url)
+    res = Net::HTTP.get_response(
+            URI.parse("http://api.bit.ly/v3/shorten?" +
+                        "login=#{@config[:bitly][:username]}" +
+                        "&apiKey=#{@config[:bitly][:apikey]}" +
+                        "&longUrl=#{CGI.escape(url)}" +
+                        "&format=txt")
+            )
+
+    if res.code.to_i != 200
+      puts "Error from bit.ly: (#{res.code}) #{res.body}"
+      return nil
+    end
+
+    puts "Shortened #{url} to #{res.body.strip}"
+    return res.body.strip
+  end
+
+  def colorize(str, color, bright=false)
+    "\033[#{bright ? 1 : 0};#{Colors[color].to_s}m#{str}\033[0m"
+  end
+
+  def trim_to_width(str, width)
+    ( str.length > width ? str[0,width-3] + '...' : str )
+  end
+
   def scan_for_updated_tickets
     messages = []
 
     issues = @jira.getIssuesFromFilter('10237')
     keys = issues.map {|i| i.key}
     keys.each do |key|
+      puts "Examining #{key}"
       issue = @jira.getIssue(key)
 
-      new_text = ''
+      new_flag = false
+      comment_text = nil
+      colorized_comment_text = nil
+      url_args = nil
+
+      message_text = colorize(issue.key, :green)
+
       if issue.created == issue.updated
         # new ticket
-        new_text = "\033[0;31m(NEW)\033[0m"
+        new_flag = true
       end
 
-      width = (@config[:jira].has_key?(:summary_width) ? @config[:jira][:summary_width] : 50)
-      trimmed_summary = ( issue.summary.length > width ? issue.summary[0,width-3] + '...' : issue.summary )
-      messages << "\033[0;32m[#{issue.key}]\033[0m#{new_text}\033[0;33m(#{@priorities[issue.priority]}/#{@statuses[issue.status]})\033[0m #{trimmed_summary} \033[0;32m(#{issue.reporter})\033[0m"
-
       comments = @jira.getComments(key)
-
       comments.each do |comment|
         if comment.updated == issue.updated or comment.created == issue.updated
           # new comment
-          trimmed_comment_text = (comment.body.length > width ? comment.body[0,width-3] + '...' : comment.body)
-          messages << "\033[0;33m - Comment from \033[0;32m#{comment.author}: \033[0m#{trimmed_comment_text}"
+          comment_text = trim_to_width(comment.body, @config[:jira][:summary_width])
         end
       end
+
+      message_text += colorize("(#{@priorities[issue.priority]}/#{@statuses[issue.status]})", :yellow) +
+          " " + trim_to_width(issue.summary, @config[:jira][:summary_width]) +
+          " " + colorize("(#{issue.reporter})", :green)
+
+      if not comment_text.nil?
+        colorized_comment_text = colorize(" - Comment from ", :yellow) + colorize(comment.author, :green) + comment_text
+        url_args = "?focusedCommentId=#{comment.id}#comment-#{comment.id}"
+      end
+
+      short_url = shorten_url(@config[:jira][:url] + "browse/" + key + url_args)
+      if not short_url.nil?
+        message_text += colorize(short_url, :cyan)
+      end
+
+      messages << message_text
+      if not colorized_comment_text.nil?
+        messages << colorized_comment_text
+      end
     end
+
 
     @config[:irc][:channels].each do |channel|
       messages.each do |message_text|
