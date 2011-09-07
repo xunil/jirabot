@@ -148,7 +148,6 @@ class JiraBot
       return nil
     end
 
-    puts "Shortened #{url} to #{res.body.strip}"
     return res.body.strip[7,res.body.strip.length]
   end
 
@@ -169,6 +168,7 @@ class JiraBot
       puts "Examining #{key}"
       issue = @jira.getIssue(key)
 
+
       new_flag = false
       comment_text = nil
       colorized_comment_text = nil
@@ -182,14 +182,12 @@ class JiraBot
 
       comments = @jira.getComments(key)
 
-      if not comment_text.nil?
-        comments.each do |comment|
-          if comment.updated == issue.updated or comment.created == issue.updated
-            # new comment
-            comment_text = trim_to_width(comment.body, @config[:jira][:summary_width])
-            colorized_comment_text = colorize(" - Comment from ", :yellow) + colorize(comment.author, :green) + comment_text
-            url_args = "?focusedCommentId=#{comment.id}#comment-#{comment.id}"
-          end
+      comments.each do |comment|
+        if comment.updated == issue.updated or comment.created == issue.updated
+          # new comment
+          comment_text = trim_to_width(comment.body, @config[:jira][:summary_width])
+          colorized_comment_text = colorize(" - Comment from", :yellow) + " " + colorize(comment.author, :green) + " " + comment_text
+          url_args = "?focusedCommentId=#{comment.id}#comment-#{comment.id}"
         end
       end
 
@@ -198,7 +196,8 @@ class JiraBot
         colorized_short_url = colorize(short_url, :cyan)
       end
 
-      message_text = colorize("[" + issue.key + "]", :green) + colorize("(#{@priorities[issue.priority]}/#{@statuses[issue.status]})", :yellow) +
+      message_text = colorize(issue.key, :green) +
+          " " + colorize("(#{@priorities[issue.priority]}/#{@statuses[issue.status]})", :yellow) +
           " " + trim_to_width(issue.summary, @config[:jira][:summary_width]) +
           " " + colorize("(#{issue.reporter})", :green) +
           " " + colorized_short_url
