@@ -149,7 +149,7 @@ class JiraBot
     end
 
     puts "Shortened #{url} to #{res.body.strip}"
-    return res.body.strip
+    return res.body.strip[7,res.body.strip.length]
   end
 
   def colorize(str, color, bright=false)
@@ -172,9 +172,8 @@ class JiraBot
       new_flag = false
       comment_text = nil
       colorized_comment_text = nil
+      colorized_short_url = nil
       url_args = nil
-
-      message_text = colorize(issue.key, :green)
 
       if issue.created == issue.updated
         # new ticket
@@ -182,26 +181,27 @@ class JiraBot
       end
 
       comments = @jira.getComments(key)
-      comments.each do |comment|
-        if comment.updated == issue.updated or comment.created == issue.updated
-          # new comment
-          comment_text = trim_to_width(comment.body, @config[:jira][:summary_width])
+
+      if not comment_text.nil?
+        comments.each do |comment|
+          if comment.updated == issue.updated or comment.created == issue.updated
+            # new comment
+            comment_text = trim_to_width(comment.body, @config[:jira][:summary_width])
+            colorized_comment_text = colorize(" - Comment from ", :yellow) + colorize(comment.author, :green) + comment_text
+            url_args = "?focusedCommentId=#{comment.id}#comment-#{comment.id}"
+          end
         end
       end
 
-      message_text += colorize("(#{@priorities[issue.priority]}/#{@statuses[issue.status]})", :yellow) +
-          " " + trim_to_width(issue.summary, @config[:jira][:summary_width]) +
-          " " + colorize("(#{issue.reporter})", :green)
-
-      if not comment_text.nil?
-        colorized_comment_text = colorize(" - Comment from ", :yellow) + colorize(comment.author, :green) + comment_text
-        url_args = "?focusedCommentId=#{comment.id}#comment-#{comment.id}"
-      end
-
-      short_url = shorten_url(@config[:jira][:url] + "browse/" + key + url_args)
+      short_url = shorten_url(@config[:jira][:url] + "browse/" + key + (url_args.nil? ? '' : url_args))
       if not short_url.nil?
-        message_text += colorize(short_url, :cyan)
+        colorized_short_url = colorize(short_url, :cyan)
       end
+
+      message_text = colorize("[" + issue.key + "]", :green) + colorize("(#{@priorities[issue.priority]}/#{@statuses[issue.status]})", :yellow) +
+          " " + trim_to_width(issue.summary, @config[:jira][:summary_width]) +
+          " " + colorize("(#{issue.reporter})", :green) +
+          " " + colorized_short_url
 
       messages << message_text
       if not colorized_comment_text.nil?
@@ -211,16 +211,20 @@ class JiraBot
 
 
     @config[:irc][:channels].each do |channel|
-      messages.each do |message_text|
-        @bot.msg(channel, message_text)
-        puts message_text
+      messages.each do |text|
+        @bot.msg(channel, text)
+        puts text
       end
     end
   end
 
   def run
     EventMachine.run do
-      EventMachine.add_periodic_timer(@config[:jira][:interval]) { EM.defer { scan_for_updated_tickets } }
+      EventMachine.add_periodic_timer(@config[:jira][:interval]) do
+        EM.defer do
+          scan_for_updated_tickets
+        end
+      end
       EM.defer {@bot.start}
     end
   end
